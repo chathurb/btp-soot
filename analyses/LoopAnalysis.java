@@ -6,6 +6,7 @@ import java.util.Map;
 import java.util.HashMap;
 
 import soot.Body;
+import soot.util.Chain;
 import soot.Local;
 import soot.Scene;
 import soot.Unit;
@@ -55,19 +56,23 @@ public class LoopAnalysis extends SceneTransformer{
 
 	@Override
 	protected void internalTransform(String arg0, Map<String, String> arg1) {
-		SootClass mainClass = Scene.v().getMainClass();
-		SootMethod mainMethod = mainClass.getMethodByName("main");
+		Chain<SootClass> classes= Scene.v().getApplicationClasses();
+		for(SootClass s : classes){
+			System.out.println("Class \"" + s.getName() + "\":");
 
-		System.out.println("main :");
-
-		Body body = mainMethod.getActiveBody();
-		LocalDefs ld = new SimpleLocalDefs(new CompleteUnitGraph(body));
-
-		LoopFinder loopFinder = new LoopFinder();
-		Set<Loop> loops = loopFinder.getLoops(body);
-
-		for(Loop loop : loops){
-			analyzeLoop(loop, ld);
+			List<SootMethod> methods =  s.getMethods();
+			for(SootMethod method : methods){
+				System.out.println("\tMethod \"" + method.getName() + "\":");
+				Body body = method.getActiveBody();
+				LocalDefs ld = new SimpleLocalDefs(new CompleteUnitGraph(body));
+		
+				LoopFinder loopFinder = new LoopFinder();
+				Set<Loop> loops = loopFinder.getLoops(body);
+		
+				for(Loop loop : loops){
+					analyzeLoop(loop, ld);
+				}
+			}
 		}
 	}
 
