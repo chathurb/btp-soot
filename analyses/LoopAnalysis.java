@@ -66,94 +66,129 @@ public class LoopAnalysis extends SceneTransformer{
 		LoopFinder loopFinder = new LoopFinder();
 		Set<Loop> loops = loopFinder.getLoops(body);
 
-		Integer counter = 0;
 		for(Loop loop : loops){
-			System.out.println("\tloop " + counter.toString() + " :");
-			List<Stmt> statements = loop.getLoopStatements();
+			analyzeLoop(loop, ld);
+		}
+	}
 
-			// Stmt s1 = statements.get(0);
-			// BytecodeOffsetTag t = (BytecodeOffsetTag)(s1.getTag("BytecodeOffsetTag"));
-			// if(t == null)
-			// 	System.out.println("bytecode offset tag not found");
-			// System.out.println(t.getBytecodeOffset());
+	private void analyzeLoop(Loop loop, LocalDefs ld){
+		List<Stmt> statements = loop.getLoopStatements();
+		System.out.println("\tloop " + getBytecodeOffset(statements.get(0)) + " :");
+		
+		Value ind = getInductionVariable(loop);
+		if(ind == null)
+			return;
+		
+		HashMap<Value, ArrayData> arrays = new HashMap<>();
 
-			HashMap<Value, ArrayData> arrays = new HashMap<>();
-
-			Value ind = getInductionVariable(loop);
-			if(ind == null)
-				continue;
-
-			// System.out.println(ind);
-			Integer i = 0;
-			for(Stmt s : statements){
-				// System.out.println(s);
-				if(s instanceof DefinitionStmt){
-					DefinitionStmt d = (DefinitionStmt)s;
-					Value left = d.getLeftOp();
-					Value right = d.getRightOp();
+		Integer i = 0;
+		for(Stmt s : statements){
+			// System.out.println(s);
+			if(s instanceof DefinitionStmt){
+				DefinitionStmt d = (DefinitionStmt)s;
+				Value left = d.getLeftOp();
+				Value right = d.getRightOp();
+				
+				if(left instanceof ArrayRef){
+					//System.out.println(d);
+					ArrayRef arr = (ArrayRef)left;
+					Value base = arr.getBase();
+					Value index = arr.getIndex();
+					DefinitionStmt def = (DefinitionStmt)ld.getDefsOfAt((Local)base, s).get(0);
+					Value name = def.getRightOp();
 					
-					if(left instanceof ArrayRef){
-						//System.out.println(d);
-						ArrayRef arr = (ArrayRef)left;
-						Value base = arr.getBase();
-						Value index = arr.getIndex();
-						DefinitionStmt def = (DefinitionStmt)ld.getDefsOfAt((Local)base, s).get(0);
-						Value name = def.getRightOp();
-						
-						if( ! arrays.containsKey(name) )
-							arrays.put(name, new ArrayData(name));
-						arrays.get(name).allReads = false;
-						
-						MyValue v = backwardSlice(ld, index, s, ind);
-						arrays.get(name).accessExpr.put(i, v);
-						if(v == null){
-							System.out.println("null");
-							// arrays.get(name).analyzable = false;
-						}
-					}
-
-					if(right instanceof ArrayRef){
-						//System.out.println(d);
-						ArrayRef arr = (ArrayRef)right;
-						Value base = arr.getBase();
-						Value index = arr.getIndex();
-						DefinitionStmt def = (DefinitionStmt)ld.getDefsOfAt((Local)base, s).get(0);
-						Value name = def.getRightOp();
-						
-						if( ! arrays.containsKey(name) )
-							arrays.put(name, new ArrayData(name));
-						
-						MyValue v = backwardSlice(ld, index, s, ind);
-						arrays.get(name).accessExpr.put(i, v);
-						// System.out.println(v);
-						if(v == null){
-							System.out.println("null");
-							// arrays.get(name).analyzable = false;
-						}
+					if( ! arrays.containsKey(name) )
+						arrays.put(name, new ArrayData(name));
+					arrays.get(name).allReads = false;
+					
+					MyValue v = backwardSlice(ld, index, s, ind);
+					arrays.get(name).accessExpr.put(i, v);
+					if(v == null){
+						System.out.println("null");
+						// arrays.get(name).analyzable = false;
 					}
 				}
-				i++;
+
+				if(right instanceof ArrayRef){
+					//System.out.println(d);
+					ArrayRef arr = (ArrayRef)right;
+					Value base = arr.getBase();
+					Value index = arr.getIndex();
+					DefinitionStmt def = (DefinitionStmt)ld.getDefsOfAt((Local)base, s).get(0);
+					Value name = def.getRightOp();
+					
+					if( ! arrays.containsKey(name) )
+						arrays.put(name, new ArrayData(name));
+					
+					MyValue v = backwardSlice(ld, index, s, ind);
+					arrays.get(name).accessExpr.put(i, v);
+					// System.out.println(v);
+					if(v == null){
+						System.out.println("null");
+						// arrays.get(name).analyzable = false;
+					}
+				}
 			}
-			// System.out.println(arrays);
-			i = 0;
+			i++;
+		}
+		// System.out.println(arrays);
+		i = 0;
 
-			Value limit = getInductionLimit(loop);
+		Value limit = getInductionLimit(loop);
 
-			boolean skipNext = false;
+		boolean skipNext = false;
 
-			for(Stmt s : statements){
-				i++;
-				if(skipNext){
-					skipNext = false;
-					continue;
-				}
-				if(s instanceof DefinitionStmt){
-					DefinitionStmt d = (DefinitionStmt)s;
-					Value left = d.getLeftOp();
-					Value right = d.getRightOp();
+		for(Stmt s : statements){
+			i++;
+			if(skipNext){
+				skipNext = false;
+				continue;
+			}
+			if(s instanceof DefinitionStmt){
+				DefinitionStmt d = (DefinitionStmt)s;
+				Value left = d.getLeftOp();
+				Value right = d.getRightOp();
+				
+				if(left instanceof ArrayRef){
+					ArrayRef arr = (ArrayRef)left;
+					Value base = arr.getBase();
 					
-					if(left instanceof ArrayRef){
-						ArrayRef arr = (ArrayRef)left;
+					DefinitionStmt def = (DefinitionStmt)ld.getDefsOfAt((Local)base, s).get(0);
+					Value name = def.getRightOp();
+					
+					Integer low = getCondition(name, arrays, i-1);
+
+					System.out.print("\t\t" + getBytecodeOffset(s) + ", ");
+
+					MyValue rhs = backwardSlice(ld, right, s, ind);
+					// System.out.println(rhs.getClass());
+
+					if(rhs.v == null){
+						if(rhs instanceof MyAddExpr)
+							System.out.print("ArrayAddConstant, ");
+						else if(rhs instanceof MySubExpr)
+							System.out.print("ArraySubConstant, ");
+						else if(rhs instanceof MyMulExpr)
+							System.out.print("ArrayMulConstant, ");
+					}else if(rhs.v != null){
+						System.out.print("ArrayAssignConstant, ");
+					}
+
+					printCondition(low, limit);
+
+					System.out.println(", true");
+				}
+
+				if(right instanceof ArrayRef && i < statements.size()-1){
+					Stmt next = statements.get(i);
+					// System.out.println(s);
+					// System.out.println(next);
+					if(next instanceof DefinitionStmt
+						&& ((DefinitionStmt)next).getLeftOp() instanceof ArrayRef
+						&& ((DefinitionStmt)next).getRightOp() == left){
+						skipNext = true;
+
+						ArrayRef arr = (ArrayRef)right;
 						Value base = arr.getBase();
 						
 						DefinitionStmt def = (DefinitionStmt)ld.getDefsOfAt((Local)base, s).get(0);
@@ -161,66 +196,26 @@ public class LoopAnalysis extends SceneTransformer{
 						
 						Integer low = getCondition(name, arrays, i-1);
 
-						System.out.print("\t\t"+i.toString()+", ");
+						ArrayRef arr2 = (ArrayRef)((DefinitionStmt)next).getLeftOp();
+						Value base2 = arr2.getBase();
 
-						MyValue rhs = backwardSlice(ld, right, s, ind);
-						// System.out.println(rhs.getClass());
+						DefinitionStmt def2 = (DefinitionStmt)ld.getDefsOfAt((Local)base2, next).get(0);
+						Value name2 = def2.getRightOp();
+						
+						Integer low2 = getCondition(name2, arrays, i);
 
-						if(rhs.v == null){
-							if(rhs instanceof MyAddExpr)
-								System.out.print("ArrayAddConstant, ");
-							else if(rhs instanceof MySubExpr)
-								System.out.print("ArraySubConstant, ");
-							else if(rhs instanceof MyMulExpr)
-								System.out.print("ArrayMulConstant, ");
-						}else if(rhs.v != null){
-							System.out.print("ArrayAssignConstant, ");
-						}
+						if(low2 < low)
+							low = low2;
+						// System.out.println(low);
+
+						System.out.print("\t\t" + getBytecodeOffset(s) + ", ArrayAssignArray, ");
 
 						printCondition(low, limit);
 
 						System.out.println(", true");
 					}
-
-					if(right instanceof ArrayRef && i < statements.size()-1){
-						Stmt next = statements.get(i);
-						// System.out.println(s);
-						// System.out.println(next);
-						if(next instanceof DefinitionStmt
-							&& ((DefinitionStmt)next).getLeftOp() instanceof ArrayRef
-							&& ((DefinitionStmt)next).getRightOp() == left){
-							skipNext = true;
-
-							ArrayRef arr = (ArrayRef)right;
-							Value base = arr.getBase();
-							
-							DefinitionStmt def = (DefinitionStmt)ld.getDefsOfAt((Local)base, s).get(0);
-							Value name = def.getRightOp();
-							
-							Integer low = getCondition(name, arrays, i-1);
-
-							ArrayRef arr2 = (ArrayRef)((DefinitionStmt)next).getLeftOp();
-							Value base2 = arr2.getBase();
-
-							DefinitionStmt def2 = (DefinitionStmt)ld.getDefsOfAt((Local)base2, next).get(0);
-							Value name2 = def2.getRightOp();
-							
-							Integer low2 = getCondition(name2, arrays, i);
-
-							if(low2 < low)
-								low = low2;
-							// System.out.println(low);
-
-							System.out.print("\t\t"+i.toString()+", ArrayAssignArray, ");
-
-							printCondition(low, limit);
-
-							System.out.println(", true");
-						}
-					}
 				}
 			}
-			counter++;
 		}
 	}
 	
@@ -274,13 +269,13 @@ public class LoopAnalysis extends SceneTransformer{
 	}
 	
 	private Value getInductionVariable(Loop l){
-		Stmt s = l.getLoopStatements().get(1);
+		Stmt s = l.getLoopStatements().get(0);
 		if(s instanceof IfStmt){
 			IfStmt i = (IfStmt)s;
 			Value cond = i.getCondition();
-			if(cond instanceof LtExpr){
-				LtExpr lt = (LtExpr)cond;
-				return lt.getOp1();
+			if(cond instanceof BinopExpr){
+				BinopExpr bin = (BinopExpr)cond;
+				return bin.getOp1();
 			}
 		}
 		
@@ -288,17 +283,26 @@ public class LoopAnalysis extends SceneTransformer{
 	}
 	
 	private Value getInductionLimit(Loop l){
-		Stmt s = l.getLoopStatements().get(1);
+		Stmt s = l.getLoopStatements().get(0);
 		if(s instanceof IfStmt){
 			IfStmt i = (IfStmt)s;
 			Value cond = i.getCondition();
-			if(cond instanceof LtExpr){
-				LtExpr lt = (LtExpr)cond;
-				return lt.getOp2();
+			if(cond instanceof BinopExpr){
+				BinopExpr bin = (BinopExpr)cond;
+				return bin.getOp2();
 			}
 		}
 		
 		return null;
+	}
+
+	private int getBytecodeOffset(Stmt s){
+		BytecodeOffsetTag t = (BytecodeOffsetTag)(s.getTag("BytecodeOffsetTag"));
+		if(t == null){
+			System.out.println("bytecode offset tag not found");
+			return 0;
+		}
+		return t.getBytecodeOffset();
 	}
 
 	private void printCondition(Integer low, Value limit){
